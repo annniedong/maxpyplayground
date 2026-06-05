@@ -1,0 +1,1932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>MaxPyLang Co-Pilot — Research Prototype v0.2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<style>
+:root {
+  --bg: #0d0d12; --bg-panel: #15151c; --bg-elevated: #1c1c25; --bg-deeper: #0a0a0f;
+  --ink: #f0ebe1; --ink-dim: #8a8a95; --ink-faint: #4a4a55;
+  --border: #2a2a35; --border-bright: #3a3a48;
+  --accent: #ff7849; --accent-dim: #b54a26;
+  --signal: #5eead4; --human: #fbbf24; --machine: #a78bfa;
+  --warn: #fbbf24; --error: #f87171;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg); color: var(--ink);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px; line-height: 1.5; height: 100vh; overflow: hidden;
+}
+body {
+  display: flex; flex-direction: column;
+  background-image:
+    radial-gradient(circle at 15% 10%, rgba(255, 120, 73, 0.05) 0%, transparent 40%),
+    radial-gradient(circle at 85% 90%, rgba(167, 139, 250, 0.04) 0%, transparent 50%);
+}
+.grain {
+  position: fixed; inset: 0; pointer-events: none; z-index: 100;
+  opacity: 0.02; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* HEADER */
+header {
+  padding: 0.7rem 1.5rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  background: var(--bg-deeper); flex-shrink: 0;
+}
+.brand { display: flex; align-items: baseline; gap: 0.75rem; }
+h1 {
+  font-family: 'Instrument Serif', serif; font-weight: 400; font-size: 1.5rem;
+  letter-spacing: -0.01em; line-height: 1;
+}
+h1 em { color: var(--accent); font-style: italic; }
+.meta-tag {
+  font-size: 0.6rem; color: var(--ink-faint); letter-spacing: 0.15em;
+  text-transform: uppercase; padding: 0.15rem 0.4rem;
+  border: 1px solid var(--border); border-radius: 2px;
+}
+.header-controls { display: flex; align-items: center; gap: 0.6rem; }
+.status-bar {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-size: 0.72rem; color: var(--ink-dim);
+}
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--ink-faint); transition: background 0.3s;
+}
+.status-dot.loading { background: var(--warn); animation: pulse 1.5s infinite; }
+.status-dot.ready { background: var(--signal); box-shadow: 0 0 6px var(--signal); }
+.status-dot.error { background: var(--error); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* BUTTONS */
+button {
+  background: transparent; color: var(--ink); border: 1px solid var(--border);
+  padding: 0.35rem 0.75rem; font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem; letter-spacing: 0.03em; cursor: pointer;
+  transition: all 0.15s; border-radius: 3px; white-space: nowrap;
+}
+button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: 0.3; cursor: not-allowed; }
+button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 500; }
+button.primary:hover:not(:disabled) { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+button.signal { border-color: var(--signal); color: var(--signal); }
+button.signal:hover:not(:disabled) { background: var(--signal); color: var(--bg); }
+button.human { border-color: var(--human); color: var(--human); }
+button.danger { border-color: var(--error); color: var(--error); }
+
+/* MAIN LAYOUT */
+main {
+  flex: 1; display: grid; grid-template-columns: 1fr 1.3fr 360px;
+  gap: 1px; background: var(--border); min-height: 0;
+}
+.panel {
+  background: var(--bg-panel); display: flex; flex-direction: column;
+  min-height: 0; overflow: hidden;
+}
+.panel-header {
+  padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--bg-deeper); flex-shrink: 0; gap: 0.5rem;
+}
+.panel-title {
+  font-family: 'Instrument Serif', serif; font-style: italic; font-size: 1.05rem;
+}
+.panel-meta {
+  font-size: 0.6rem; color: var(--ink-dim);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.panel-body {
+  flex: 1; overflow: auto; padding: 0.8rem;
+  display: flex; flex-direction: column; min-height: 0;
+}
+
+/* CODE PANEL */
+#code {
+  flex: 1; background: var(--bg-elevated); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 4px; padding: 0.75rem;
+  font-family: 'JetBrains Mono', monospace; font-size: 11.5px; line-height: 1.6;
+  resize: none; outline: none; tab-size: 4; min-height: 0;
+}
+#code:focus { border-color: var(--accent-dim); }
+#code.synced-from-graph {
+  border-left: 3px solid var(--signal);
+}
+.code-controls { display: flex; gap: 0.4rem; margin-top: 0.5rem; flex-wrap: wrap; }
+.code-hint {
+  font-size: 0.65rem; color: var(--ink-faint); margin-top: 0.4rem;
+  font-style: italic;
+}
+
+/* GRAPH PANEL with TOOLBAR */
+.graph-toolbar {
+  display: flex; gap: 0.25rem; align-items: center; padding: 0.5rem 0.9rem;
+  background: var(--bg-deeper); border-bottom: 1px solid var(--border);
+  flex-shrink: 0; flex-wrap: wrap;
+}
+.tool-btn {
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0.35rem 0.6rem; font-size: 0.7rem;
+  border: 1px solid var(--border); background: transparent; color: var(--ink-dim);
+  cursor: pointer; border-radius: 3px; transition: all 0.15s;
+  font-family: 'JetBrains Mono', monospace;
+}
+.tool-btn:hover { color: var(--ink); border-color: var(--border-bright); }
+.tool-btn.active {
+  background: var(--accent); color: var(--bg); border-color: var(--accent);
+}
+.tool-btn .icon { font-size: 0.9rem; line-height: 1; }
+.tool-sep { width: 1px; height: 18px; background: var(--border); margin: 0 0.3rem; }
+.tool-aside {
+  margin-left: auto; display: flex; gap: 0.25rem; align-items: center;
+  font-size: 0.65rem; color: var(--ink-faint);
+}
+
+#graph-viz {
+  flex: 1; background: var(--bg-elevated);
+  border: 1px solid var(--border); border-radius: 4px;
+  position: relative; overflow: hidden; min-height: 0;
+}
+#graph-svg {
+  width: 100%; height: 100%; display: block;
+  cursor: default;
+}
+#graph-svg.mode-connect { cursor: cell; }
+.graph-placeholder {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; color: var(--ink-faint);
+  font-size: 0.8rem; text-align: center; padding: 1.5rem; pointer-events: none;
+}
+.graph-placeholder em {
+  font-family: 'Instrument Serif', serif; font-size: 1.4rem;
+  color: var(--ink-dim); margin-bottom: 0.4rem;
+}
+
+/* SVG node styling */
+.node-group { cursor: pointer; }
+.node-group.selected .node-box { stroke: var(--accent); stroke-width: 2.5; }
+.node-group.dimmed { opacity: 0.4; }
+.node-box { fill: var(--bg-panel); stroke: var(--border); stroke-width: 1.5; transition: stroke 0.15s; }
+.node-box.osc { stroke: var(--accent); }
+.node-box.gain { stroke: var(--signal); }
+.node-box.filter { stroke: var(--warn); }
+.node-box.out { stroke: var(--ink); stroke-width: 2; }
+.node-box.control { stroke: var(--human); }
+.node-label { fill: var(--ink); font-family: 'JetBrains Mono', monospace; font-size: 10px; pointer-events: none; }
+.node-sublabel { fill: var(--ink-dim); font-family: 'JetBrains Mono', monospace; font-size: 8px; pointer-events: none; }
+.node-port {
+  fill: var(--bg-elevated); stroke: var(--ink-faint); stroke-width: 1;
+  cursor: pointer; transition: all 0.15s;
+}
+.node-port:hover { fill: var(--signal); stroke: var(--signal); r: 5; }
+.node-port.connect-source { fill: var(--accent); stroke: var(--accent); }
+.node-port.connect-target-valid { fill: var(--signal); stroke: var(--signal); r: 5; }
+.patch-line { fill: none; stroke: var(--ink-faint); stroke-width: 1.5; transition: stroke 0.3s; pointer-events: none; }
+.patch-line.active { stroke: var(--signal); stroke-width: 2; filter: drop-shadow(0 0 3px var(--signal)); }
+.patch-line.in-progress { stroke: var(--accent); stroke-dasharray: 4 3; }
+.control-slider-track {
+  fill: var(--bg-deeper); stroke: var(--ink-faint); stroke-width: 0.5;
+}
+.control-slider-fill { fill: var(--human); }
+.control-slider-handle { fill: var(--ink); cursor: ew-resize; }
+
+/* NODE PALETTE (draggable chips) */
+.node-palette {
+  display: flex; gap: 0.9rem; padding: 0.5rem 0.9rem;
+  background: var(--bg-deeper); border-bottom: 1px solid var(--border);
+  flex-wrap: wrap; align-items: center; flex-shrink: 0;
+}
+.palette-section { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+.palette-label {
+  font-family: 'Instrument Serif', serif; font-size: 0.95rem;
+  color: var(--ink-dim);
+}
+.palette-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.palette-chip {
+  padding: 0.28rem 0.55rem; font-size: 0.7rem;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 3px; cursor: grab; color: var(--ink);
+  font-family: 'JetBrains Mono', monospace;
+  user-select: none; transition: all 0.12s;
+}
+.palette-chip:hover {
+  background: var(--bg-panel); border-color: var(--border-bright);
+  transform: translateY(-1px);
+}
+.palette-chip:active { cursor: grabbing; transform: scale(0.96); }
+.palette-chip.osc    { border-left: 2px solid var(--accent); }
+.palette-chip.gain   { border-left: 2px solid var(--signal); }
+.palette-chip.filter { border-left: 2px solid var(--warn); }
+.palette-chip.out    { border-left: 2px solid var(--ink); }
+.palette-chip.control {
+  border-left: 2px solid var(--human);
+  background: rgba(251, 191, 36, 0.06);
+}
+.palette-chip.control:hover {
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--human);
+}
+.palette-chip.dragging { opacity: 0.4; }
+
+#graph-svg.drag-over {
+  background:
+    radial-gradient(circle at center, rgba(255, 120, 73, 0.06) 0%, transparent 60%);
+  outline: 1px dashed var(--accent);
+  outline-offset: -3px;
+}
+
+/* CONSOLE */
+#console-output {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.62rem;
+  color: var(--ink-dim); overflow-y: auto; max-height: 60px;
+  padding-right: 1rem; line-height: 1.4; margin-top: 0.4rem;
+}
+.stdout-line { color: var(--signal); }
+.stderr-line { color: var(--error); }
+.empty-line { color: var(--ink-faint); font-style: italic; }
+
+/* CHAT */
+.chat-messages {
+  flex: 1; overflow-y: auto; padding: 0.4rem 0;
+  display: flex; flex-direction: column; gap: 0.7rem; min-height: 0;
+}
+.msg { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; line-height: 1.5; }
+.msg-header {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-size: 0.6rem; color: var(--ink-dim);
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.msg-tag { padding: 0.08rem 0.35rem; border-radius: 2px; font-weight: 500; }
+.msg-tag.human { background: rgba(251, 191, 36, 0.15); color: var(--human); }
+.msg-tag.machine { background: rgba(167, 139, 250, 0.15); color: var(--machine); }
+.msg-tag.system { background: rgba(94, 234, 212, 0.1); color: var(--signal); }
+.msg-body {
+  padding: 0.5rem 0.65rem; border-radius: 4px; background: var(--bg-elevated);
+  border-left: 2px solid var(--border);
+}
+.msg.human .msg-body { border-left-color: var(--human); }
+.msg.machine .msg-body { border-left-color: var(--machine); }
+.msg.system .msg-body {
+  border-left-color: var(--signal); font-size: 0.7rem;
+  color: var(--ink-dim); font-style: italic;
+}
+.msg pre {
+  background: var(--bg-deeper); padding: 0.4rem; border-radius: 3px;
+  margin: 0.3rem 0; overflow-x: auto; font-size: 0.68rem;
+  border: 1px solid var(--border); white-space: pre-wrap;
+}
+
+/* PROPOSAL CARD */
+.proposal-card {
+  margin-top: 0.4rem; background: var(--bg-deeper);
+  border: 1px solid var(--machine); border-radius: 4px;
+  padding: 0.5rem; font-size: 0.7rem;
+}
+.proposal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 0.3rem; color: var(--machine); font-size: 0.6rem;
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.proposal-actions { display: flex; gap: 0.3rem; margin-top: 0.4rem; flex-wrap: wrap; }
+.proposal-actions button { padding: 0.25rem 0.5rem; font-size: 0.65rem; }
+
+/* CHAT INPUT */
+.chat-input-area {
+  border-top: 1px solid var(--border); padding: 0.6rem;
+  background: var(--bg-deeper); flex-shrink: 0;
+}
+#chat-input {
+  width: 100%; background: var(--bg-elevated); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 0.5rem 0.6rem; font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem; resize: none; outline: none; min-height: 55px;
+}
+#chat-input:focus { border-color: var(--accent-dim); }
+.chat-input-controls {
+  display: flex; gap: 0.35rem; margin-top: 0.4rem; align-items: center;
+  flex-wrap: wrap;
+}
+.input-hint {
+  font-size: 0.6rem; color: var(--ink-faint); margin-left: auto;
+}
+.selection-info {
+  font-size: 0.62rem; color: var(--accent); padding: 0.3rem 0.4rem;
+  background: rgba(255, 120, 73, 0.08); border-radius: 2px;
+  margin-bottom: 0.4rem; display: none;
+}
+.selection-info.show { display: block; }
+
+/* BOTTOM BAR */
+.bottom-bar {
+  border-top: 1px solid var(--border); background: var(--bg-deeper);
+  padding: 0.5rem 1.5rem; display: flex; align-items: center;
+  justify-content: space-between; gap: 1rem; font-size: 0.68rem; flex-shrink: 0;
+}
+.vu-meter {
+  display: inline-flex; align-items: center; gap: 3px;
+  height: 16px; margin-left: 0.5rem;
+}
+.vu-bar {
+  width: 2.5px; background: var(--ink-faint); border-radius: 1px;
+  transition: background 0.05s, height 0.05s; height: 3px;
+}
+.vu-bar.lit { background: var(--signal); }
+.vu-bar.hot { background: var(--accent); }
+.interaction-stats { display: flex; gap: 0.9rem; color: var(--ink-dim); flex-wrap: wrap; }
+.stat-item { display: flex; align-items: center; gap: 0.3rem; }
+.stat-dot { width: 6px; height: 6px; border-radius: 50%; }
+.stat-dot.human { background: var(--human); }
+.stat-dot.machine { background: var(--machine); }
+
+/* MODAL */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7);
+  display: none; align-items: center; justify-content: center;
+  z-index: 200; backdrop-filter: blur(4px);
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--bg-panel); border: 1px solid var(--border-bright);
+  border-radius: 6px; padding: 1.5rem; max-width: 500px; width: 90%;
+}
+.modal h2 {
+  font-family: 'Instrument Serif', serif; font-style: italic;
+  font-size: 1.4rem; margin-bottom: 0.5rem;
+}
+.modal p { color: var(--ink-dim); margin-bottom: 1rem; font-size: 0.78rem; }
+.modal label { font-size: 0.72rem; color: var(--ink-dim); display: block; }
+.modal input[type="password"], .modal input[type="text"] {
+  width: 100%; background: var(--bg-elevated); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 0.55rem 0.7rem; font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem; margin-bottom: 0.5rem; outline: none;
+}
+.modal-actions {
+  display: flex; gap: 0.4rem; justify-content: flex-end; margin-top: 1rem;
+}
+.warning-note {
+  background: rgba(251, 191, 36, 0.08); border-left: 2px solid var(--warn);
+  padding: 0.4rem 0.65rem; font-size: 0.68rem; color: var(--warn);
+  margin-bottom: 1rem; border-radius: 3px;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-deeper); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<header>
+  <div class="brand">
+    <h1>MaxPyLang <em>Co-Pilot</em></h1>
+    <span class="meta-tag">Research Prototype · v0.2</span>
+  </div>
+  <div class="header-controls">
+    <div class="status-bar">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">Initializing…</span>
+    </div>
+    <button id="settings-btn">⚙ Settings</button>
+    <button id="export-btn">Export Log</button>
+  </div>
+</header>
+
+<main>
+  <!-- LEFT: CODE -->
+  <section class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Python <em>source</em></span>
+      <span class="panel-meta" id="code-source-tag">manual</span>
+    </div>
+    <div class="panel-body">
+      <textarea id="code" spellcheck="false">import maxpylang as mp
+
+patch = mp.MaxPatch()
+osc1 = patch.place("cycle~ 440")[0]
+gain1 = patch.place("*~ 0.15")[0]
+out1 = patch.place("ezdac~")[0]
+
+patch.connect([osc1.outs[0], gain1.ins[0]])
+patch.connect([gain1.outs[0], out1.ins[0]])
+patch.connect([gain1.outs[0], out1.ins[1]])
+</textarea>
+      <div class="code-controls">
+        <button id="run-btn" class="primary human" disabled>▸ Run code</button>
+        <button id="play-btn" class="signal" disabled>♪ Play</button>
+        <button id="stop-btn" disabled>■ Stop</button>
+      </div>
+      <div class="code-hint">Code edits sync to graph on Run. Graph edits sync to code instantly.</div>
+    </div>
+  </section>
+
+  <!-- CENTER: GRAPH with TOOLBAR -->
+  <section class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Patch <em>graph</em></span>
+      <span class="panel-meta" id="graph-meta">— · —</span>
+    </div>
+    <div class="graph-toolbar">
+      <button class="tool-btn active" data-mode="select" title="Select/move nodes (V)">
+        <span class="icon">↖</span><span>Select</span>
+      </button>
+      <button class="tool-btn" data-mode="connect" title="Draw connections (A)">
+        <span class="icon">→</span><span>Connect</span>
+      </button>
+      <span class="tool-sep"></span>
+      <button id="auto-arrange-btn" title="Auto-arrange layout">⊞ Arrange</button>
+      <button id="clear-graph-btn" class="danger" title="Clear all nodes">⌫ Clear</button>
+      <div class="tool-aside">
+        <span id="selection-count">no selection</span>
+      </div>
+    </div>
+    <div class="node-palette">
+      <div class="palette-section">
+        <span class="palette-label"><em>Static</em></span>
+        <div class="palette-chips">
+          <div class="palette-chip osc"    draggable="true" data-text="cycle~ 440">cycle~ 440</div>
+          <div class="palette-chip osc"    draggable="true" data-text="saw~ 220">saw~ 220</div>
+          <div class="palette-chip osc"    draggable="true" data-text="tri~ 220">tri~ 220</div>
+          <div class="palette-chip osc"    draggable="true" data-text="rect~ 220">rect~ 220</div>
+          <div class="palette-chip osc"    draggable="true" data-text="noise~">noise~</div>
+          <div class="palette-chip gain"   draggable="true" data-text="*~ 0.5">*~ 0.5</div>
+          <div class="palette-chip gain"   draggable="true" data-text="+~">+~</div>
+          <div class="palette-chip filter" draggable="true" data-text="lores~ 800 1">lores~</div>
+          <div class="palette-chip filter" draggable="true" data-text="hires~ 800 1">hires~</div>
+          <div class="palette-chip out"    draggable="true" data-text="ezdac~">ezdac~</div>
+        </div>
+      </div>
+      <div class="palette-section">
+        <span class="palette-label"><em>User-controlled</em></span>
+        <div class="palette-chips">
+          <div class="palette-chip control" draggable="true"
+               data-text="*~ 0.5"  data-control="1" data-min="0"   data-max="1"    data-value="0.5">value 0–1</div>
+          <div class="palette-chip control" draggable="true"
+               data-text="*~ 440"  data-control="1" data-min="0"   data-max="2000" data-value="440">freq 0–2k</div>
+          <div class="palette-chip control" draggable="true"
+               data-text="*~ 1000" data-control="1" data-min="100" data-max="5000" data-value="1000">cutoff 100–5k</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div id="graph-viz">
+        <svg id="graph-svg" viewBox="0 0 800 480" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="graph-placeholder" id="placeholder">
+          <em>blank canvas</em>
+          <span>drag nodes from the palette above, or run code to materialize a graph</span>
+        </div>
+      </div>
+      <div id="console-output"><span class="empty-line">(stdout / stderr appear here)</span></div>
+    </div>
+  </section>
+
+  <!-- RIGHT: CHAT -->
+  <section class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Co-pilot <em>chat</em></span>
+      <span class="panel-meta" id="model-tag">claude</span>
+    </div>
+    <div class="chat-messages" id="chat-messages">
+      <div class="msg system">
+        <div class="msg-header"><span class="msg-tag system">system</span></div>
+        <div class="msg-body">
+          Select nodes in the graph to ask the co-pilot to extend that section. Or ask freely. The co-pilot proposes — you choose whether to accept.
+        </div>
+      </div>
+    </div>
+    <div class="chat-input-area">
+      <div class="selection-info" id="selection-info"></div>
+      <textarea id="chat-input" placeholder="e.g., 'add an LFO that modulates the filter cutoff' or 'extend this with a reverb'"></textarea>
+      <div class="chat-input-controls">
+        <button id="send-btn" class="primary" disabled>Send</button>
+        <button id="extend-btn" disabled>Extend selection</button>
+        <button id="explain-btn">Explain patch</button>
+        <span class="input-hint">⌘+Enter</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="bottom-bar">
+  <div class="playback-controls">
+    <span class="panel-meta">SIGNAL</span>
+    <div class="vu-meter" id="vu-meter"></div>
+  </div>
+  <div class="interaction-stats">
+    <span class="stat-item"><span class="stat-dot human"></span><span id="stat-human">0</span> human</span>
+    <span class="stat-item"><span class="stat-dot machine"></span><span id="stat-machine">0</span> machine</span>
+    <span class="stat-item"><span class="stat-dot" style="background: var(--signal)"></span><span id="stat-accepted">0</span> accepted</span>
+    <span class="stat-item"><span class="stat-dot" style="background: var(--error)"></span><span id="stat-rejected">0</span> rejected</span>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settings-modal">
+  <div class="modal">
+    <h2>Settings</h2>
+    <p>The co-pilot calls Anthropic's API directly from your browser. Your key is stored locally and only sent to api.anthropic.com.</p>
+    <div class="warning-note">
+      <strong>Research prototype:</strong> direct browser API calls expose the key. Use a scoped key with low limits.
+    </div>
+    <label>ANTHROPIC API KEY</label>
+    <input type="password" id="api-key-input" placeholder="sk-ant-..." />
+    <label>MODEL</label>
+    <input type="text" id="model-input" value="claude-opus-4-5" />
+    <div class="modal-actions">
+      <button id="settings-cancel">Cancel</button>
+      <button id="settings-save" class="primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// =============================================================================
+//  STATE
+// =============================================================================
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// The patch model — the source of truth for the graph and code
+const patchModel = {
+  nodes: [],          // {id, text, x, y, varName, isControl, controlValue, controlMin, controlMax}
+  connections: [],    // {src, srcOutlet, dst, dstInlet}
+  nextId: 1,
+};
+
+const state = {
+  pyodide: null,
+  audioCtx: null,
+  audioNodes: {},     // {nodeId: {audioNode, inlets, outlets, controlGain}}
+  activeSources: [],
+  masterGain: null,
+  analyser: null,
+  mode: 'select',
+  selectedIds: new Set(),
+  draggingNode: null,
+  dragOffset: {x: 0, y: 0},
+  connecting: null,   // {srcNodeId, srcOutlet, x, y} or null
+  pickerLocation: null,  // {x, y} for placement
+  pickerType: 'static',  // 'static' | 'control'
+};
+
+const stats = { human: 0, machine: 0, accepted: 0, rejected: 0 };
+const chatHistory = [];
+const interactionLog = [];
+
+const settings = {
+  apiKey: localStorage.getItem('anthropic_key') || '',
+  model: localStorage.getItem('anthropic_model') || 'claude-opus-4-5',
+};
+
+// =============================================================================
+//  KNOWLEDGE BASE
+// =============================================================================
+
+const KNOWLEDGE_BASE = `# MaxPyLang API Reference
+
+MaxPyLang generates MaxMSP patches as Python code:
+
+\`\`\`python
+import maxpylang as mp
+patch = mp.MaxPatch()
+obj = patch.place("cycle~ 440")[0]
+patch.connect([src.outs[i], dst.ins[j]])
+\`\`\`
+
+# Available objects (each maps to a real WebAudio node)
+- \`cycle~ <freq>\` — sine oscillator
+- \`saw~ <freq>\`, \`tri~ <freq>\`, \`rect~ <freq>\`, \`phasor~ <freq>\` — other waveforms
+- \`noise~\` — white noise
+- \`*~ <val>\` — multiplier. Inlet 0=signal, inlet 1=gain modulation
+- \`+~\` — additive summing
+- \`lores~ <cutoff> <Q>\` — lowpass filter. Inlets: 0=signal, 1=cutoff, 2=Q
+- \`hires~ <cutoff> <Q>\` — highpass
+- \`ezdac~\` — stereo output. Inlet 0=L, inlet 1=R. ALWAYS terminate here.
+
+# DSP idioms
+- AM: LFO → \`*~\`.ins[1] modulating carrier into ins[0]
+- FM: modulator → \`*~ <depth>\` → carrier.ins[0] (frequency inlet)
+- Filtering: signal → lores~ → output; modulate cutoff via inlet 1
+- Subtractive: rich source → filter → output
+
+# Constraints
+- Always terminate at \`ezdac~\`, connecting to both ins[0] and ins[1]
+- Final gain modest (~0.1 to 0.3) to avoid clipping
+- No audio-rate feedback loops
+
+# Your role
+
+You're a creative collaborator, not autocomplete. When asked for changes:
+1. Propose ONE specific direction (not generic boilerplate)
+2. Return FULL revised code in a single Python code block
+3. Briefly explain what changed (2-3 sentences)
+4. Mention 1-2 alternative directions
+
+Don't homogenize toward safe patches. The user can reject — that's the collaboration.`;
+
+// =============================================================================
+//  STATUS / LOG
+// =============================================================================
+
+function setStatus(msg, cls = '') {
+  document.getElementById('status-text').textContent = msg;
+  document.getElementById('status-dot').className = 'status-dot ' + cls;
+}
+
+function appendConsole(text, cls = 'stdout-line') {
+  const el = document.getElementById('console-output');
+  if (el.querySelector('.empty-line')) el.innerHTML = '';
+  const span = document.createElement('span');
+  span.className = cls;
+  span.textContent = text + '\n';
+  el.appendChild(span);
+  el.scrollTop = el.scrollHeight;
+}
+
+function logEvent(type, detail = {}) {
+  interactionLog.push({ type, detail, timestamp: Date.now() });
+}
+
+function updateStats(key, delta = 1) {
+  stats[key] += delta;
+  document.getElementById('stat-' + key).textContent = stats[key];
+}
+
+// =============================================================================
+//  MODEL HELPERS
+// =============================================================================
+
+function deriveVarName(text, instances) {
+  const first = text.split(/\s+/)[0];
+  const map = {
+    'cycle~': 'osc', 'saw~': 'saw', 'tri~': 'tri', 'rect~': 'rect',
+    'phasor~': 'phasor', 'noise~': 'noise',
+    '*~': 'mul', '+~': 'sum', 'gain~': 'gain',
+    'lores~': 'lp', 'hires~': 'hp', 'biquad~': 'bq',
+    'ezdac~': 'out', 'dac~': 'out',
+  };
+  const base = map[first] || 'obj';
+  return base + instances;
+}
+
+function addNode(nodeSpec) {
+  const id = 'obj-' + patchModel.nextId++;
+  // Count instances of this base name for unique variable naming
+  const first = nodeSpec.text.split(/\s+/)[0];
+  const instances = patchModel.nodes.filter(
+    n => n.text.split(/\s+/)[0] === first
+  ).length + 1;
+  const varName = deriveVarName(nodeSpec.text, instances);
+  const node = {
+    id, varName,
+    text: nodeSpec.text,
+    x: nodeSpec.x || 100,
+    y: nodeSpec.y || 100,
+    isControl: nodeSpec.isControl || false,
+    controlValue: nodeSpec.controlValue,
+    controlMin: nodeSpec.controlMin,
+    controlMax: nodeSpec.controlMax,
+  };
+  patchModel.nodes.push(node);
+  return node;
+}
+
+function removeNode(id) {
+  patchModel.nodes = patchModel.nodes.filter(n => n.id !== id);
+  patchModel.connections = patchModel.connections.filter(
+    c => c.src !== id && c.dst !== id
+  );
+}
+
+function addConnection(srcId, srcOutlet, dstId, dstInlet) {
+  // Don't add duplicates
+  const exists = patchModel.connections.some(c =>
+    c.src === srcId && c.srcOutlet === srcOutlet &&
+    c.dst === dstId && c.dstInlet === dstInlet
+  );
+  if (exists) return;
+  patchModel.connections.push({ src: srcId, srcOutlet, dst: dstId, dstInlet });
+}
+
+function clearModel() {
+  patchModel.nodes = [];
+  patchModel.connections = [];
+  patchModel.nextId = 1;
+}
+
+// =============================================================================
+//  MODEL ↔ CODE
+// =============================================================================
+
+function modelToPython(model) {
+  if (model.nodes.length === 0) {
+    return `import maxpylang as mp\n\npatch = mp.MaxPatch()\n# (empty graph)\n`;
+  }
+  let code = `import maxpylang as mp\n\npatch = mp.MaxPatch()\n`;
+  for (const n of model.nodes) {
+    // Use the controlValue for control nodes' text
+    let text = n.text;
+    if (n.isControl && n.controlValue !== undefined) {
+      const parts = text.split(/\s+/);
+      text = parts[0] + ' ' + n.controlValue;
+    }
+    code += `${n.varName} = patch.place("${text}")[0]\n`;
+  }
+  code += `\n`;
+  for (const c of model.connections) {
+    const src = model.nodes.find(n => n.id === c.src);
+    const dst = model.nodes.find(n => n.id === c.dst);
+    if (src && dst) {
+      code += `patch.connect([${src.varName}.outs[${c.srcOutlet}], ${dst.varName}.ins[${c.dstInlet}]])\n`;
+    }
+  }
+  return code;
+}
+
+function modelToDict(model) {
+  return {
+    patcher: {
+      boxes: model.nodes.map(n => ({
+        box: {
+          id: n.id,
+          maxclass: 'newobj',
+          text: n.text,
+          patching_rect: [n.x, n.y, 100, 22],
+        },
+      })),
+      lines: model.connections.map(c => ({
+        patchline: {
+          source: [c.src, c.srcOutlet],
+          destination: [c.dst, c.dstInlet],
+        },
+      })),
+    },
+  };
+}
+
+function dictToModel(dict) {
+  clearModel();
+  const boxes = (dict.patcher && dict.patcher.boxes) || [];
+  const lines = (dict.patcher && dict.patcher.lines) || [];
+
+  // Track instances per object type for varName generation
+  const instanceCounts = {};
+
+  for (const b of boxes) {
+    const text = b.box.text || '';
+    const first = text.split(/\s+/)[0] || 'obj';
+    instanceCounts[first] = (instanceCounts[first] || 0) + 1;
+    const rect = b.box.patching_rect || [100, 100];
+    patchModel.nodes.push({
+      id: b.box.id,
+      varName: deriveVarName(text, instanceCounts[first]),
+      text,
+      x: rect[0] || 100,
+      y: rect[1] || 100,
+      isControl: false,
+    });
+    // Track max id for nextId
+    const idNum = parseInt((b.box.id || '').replace(/\D/g, '')) || 0;
+    if (idNum >= patchModel.nextId) patchModel.nextId = idNum + 1;
+  }
+
+  for (const l of lines) {
+    const src = l.patchline.source;
+    const dst = l.patchline.destination;
+    patchModel.connections.push({
+      src: src[0],
+      srcOutlet: src[1] || 0,
+      dst: dst[0],
+      dstInlet: dst[1] || 0,
+    });
+  }
+}
+
+function syncCodeFromModel() {
+  const code = modelToPython(patchModel);
+  document.getElementById('code').value = code;
+  document.getElementById('code').classList.add('synced-from-graph');
+  document.getElementById('code-source-tag').textContent = 'from graph';
+}
+
+// =============================================================================
+//  GRAPH RENDERING (with interactivity)
+// =============================================================================
+
+const NODE_W = 110;
+const NODE_H_NORMAL = 40;
+const NODE_H_CONTROL = 56;
+const PORT_R = 3.5;
+
+function nodeHeight(node) {
+  return node.isControl ? NODE_H_CONTROL : NODE_H_NORMAL;
+}
+
+function classifyObject(text, isControl) {
+  if (isControl) return 'control';
+  if (!text) return 'other';
+  const name = text.split(/\s+/)[0];
+  if (['cycle~', 'saw~', 'tri~', 'rect~', 'phasor~', 'noise~'].includes(name)) return 'osc';
+  if (['*~', '+~', '-~', 'gain~'].includes(name)) return 'gain';
+  if (['lores~', 'hires~', 'biquad~', 'svf~', 'reson~'].includes(name)) return 'filter';
+  if (['dac~', 'ezdac~'].includes(name)) return 'out';
+  return 'other';
+}
+
+function renderGraph() {
+  const svg = document.getElementById('graph-svg');
+  svg.innerHTML = '';
+  document.getElementById('placeholder').style.display =
+    patchModel.nodes.length === 0 ? 'flex' : 'none';
+  document.getElementById('graph-meta').textContent =
+    `${patchModel.nodes.length} nodes · ${patchModel.connections.length} edges`;
+
+  // Draw connections first (behind nodes)
+  for (const c of patchModel.connections) {
+    const src = patchModel.nodes.find(n => n.id === c.src);
+    const dst = patchModel.nodes.find(n => n.id === c.dst);
+    if (!src || !dst) continue;
+    const srcOuts = numOutlets(src);
+    const dstIns = numInlets(dst);
+    const x1 = src.x + NODE_W;
+    const y1 = src.y + portY(c.srcOutlet, srcOuts, nodeHeight(src));
+    const x2 = dst.x;
+    const y2 = dst.y + portY(c.dstInlet, dstIns, nodeHeight(dst));
+    const cx = (x1 + x2) / 2;
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`);
+    path.setAttribute('class', 'patch-line');
+    svg.appendChild(path);
+  }
+
+  // Draw in-progress connection (during 'connect' mode)
+  if (state.connecting) {
+    const src = patchModel.nodes.find(n => n.id === state.connecting.srcNodeId);
+    if (src) {
+      const srcOuts = numOutlets(src);
+      const x1 = src.x + NODE_W;
+      const y1 = src.y + portY(state.connecting.srcOutlet, srcOuts, nodeHeight(src));
+      const path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', `M ${x1} ${y1} L ${state.connecting.x} ${state.connecting.y}`);
+      path.setAttribute('class', 'patch-line in-progress');
+      svg.appendChild(path);
+    }
+  }
+
+  // Draw nodes
+  for (const node of patchModel.nodes) {
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('transform', `translate(${node.x},${node.y})`);
+    g.setAttribute('class', 'node-group' + (state.selectedIds.has(node.id) ? ' selected' : ''));
+    g.dataset.nodeId = node.id;
+
+    const cls = classifyObject(node.text, node.isControl);
+    const h = nodeHeight(node);
+
+    const rect = document.createElementNS(SVG_NS, 'rect');
+    rect.setAttribute('width', NODE_W);
+    rect.setAttribute('height', h);
+    rect.setAttribute('rx', 3);
+    rect.setAttribute('class', `node-box ${cls}`);
+    g.appendChild(rect);
+
+    const label = document.createElementNS(SVG_NS, 'text');
+    label.setAttribute('x', NODE_W / 2);
+    label.setAttribute('y', 16);
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('class', 'node-label');
+    label.textContent = node.text;
+    g.appendChild(label);
+
+    const sub = document.createElementNS(SVG_NS, 'text');
+    sub.setAttribute('x', NODE_W / 2);
+    sub.setAttribute('y', 30);
+    sub.setAttribute('text-anchor', 'middle');
+    sub.setAttribute('class', 'node-sublabel');
+    sub.textContent = node.varName;
+    g.appendChild(sub);
+
+    // Control slider
+    if (node.isControl) {
+      const sliderY = 42;
+      const sliderX = 8, sliderW = NODE_W - 16;
+      const track = document.createElementNS(SVG_NS, 'rect');
+      track.setAttribute('x', sliderX); track.setAttribute('y', sliderY);
+      track.setAttribute('width', sliderW); track.setAttribute('height', 6);
+      track.setAttribute('rx', 2); track.setAttribute('class', 'control-slider-track');
+      g.appendChild(track);
+      const pct = (node.controlValue - node.controlMin) / (node.controlMax - node.controlMin);
+      const fill = document.createElementNS(SVG_NS, 'rect');
+      fill.setAttribute('x', sliderX); fill.setAttribute('y', sliderY);
+      fill.setAttribute('width', sliderW * pct); fill.setAttribute('height', 6);
+      fill.setAttribute('rx', 2); fill.setAttribute('class', 'control-slider-fill');
+      g.appendChild(fill);
+      const handle = document.createElementNS(SVG_NS, 'circle');
+      handle.setAttribute('cx', sliderX + sliderW * pct);
+      handle.setAttribute('cy', sliderY + 3);
+      handle.setAttribute('r', 5);
+      handle.setAttribute('class', 'control-slider-handle');
+      handle.dataset.role = 'slider';
+      handle.dataset.nodeId = node.id;
+      g.appendChild(handle);
+    }
+
+    // Inlet ports (top edge)
+    const numIn = numInlets(node);
+    for (let i = 0; i < numIn; i++) {
+      const port = document.createElementNS(SVG_NS, 'circle');
+      port.setAttribute('cx', NODE_W * (i + 1) / (numIn + 1));
+      port.setAttribute('cy', 0);
+      port.setAttribute('r', PORT_R);
+      port.setAttribute('class', 'node-port inlet');
+      port.dataset.nodeId = node.id;
+      port.dataset.role = 'inlet';
+      port.dataset.idx = i;
+      g.appendChild(port);
+    }
+    // Outlet ports (bottom edge)
+    const numOut = numOutlets(node);
+    for (let i = 0; i < numOut; i++) {
+      const port = document.createElementNS(SVG_NS, 'circle');
+      port.setAttribute('cx', NODE_W * (i + 1) / (numOut + 1));
+      port.setAttribute('cy', h);
+      port.setAttribute('r', PORT_R);
+      port.setAttribute('class', 'node-port outlet');
+      port.dataset.nodeId = node.id;
+      port.dataset.role = 'outlet';
+      port.dataset.idx = i;
+      g.appendChild(port);
+    }
+
+    svg.appendChild(g);
+  }
+
+  updateSelectionInfo();
+}
+
+function numInlets(node) {
+  if (!node || !node.text) return 1;
+  const name = node.text.split(/\s+/)[0];
+  if (['cycle~', 'saw~', 'tri~', 'rect~', 'phasor~'].includes(name)) return 1;
+  if (name === 'noise~') return 0;
+  if (name === '*~') return 2;
+  if (name === '+~' || name === 'gain~') return 2;
+  if (['lores~', 'hires~', 'biquad~', 'reson~'].includes(name)) return 3;
+  if (['dac~', 'ezdac~'].includes(name)) return 2;
+  return 1;
+}
+
+function numOutlets(node) {
+  if (!node || !node.text) return 1;
+  const name = node.text.split(/\s+/)[0];
+  if (['dac~', 'ezdac~'].includes(name)) return 0;
+  return 1;
+}
+
+function portY(idx, count, h) {
+  // Used for connection endpoints (top/bottom of node)
+  return 0;  // ports are at top (inlets) or bottom (outlets) — handled by caller
+}
+
+// Override: port positions are at top/bottom edges. We need a helper that
+// returns the actual coordinates given the port role.
+function portCoords(node, role, idx) {
+  const x = node.x + NODE_W * (idx + 1) / ((role === 'inlet' ? numInlets(node) : numOutlets(node)) + 1);
+  const y = role === 'inlet' ? node.y : node.y + nodeHeight(node);
+  return { x, y };
+}
+
+// Re-render with correct port-to-port line geometry
+function renderGraph2() {
+  const svg = document.getElementById('graph-svg');
+  svg.innerHTML = '';
+  document.getElementById('placeholder').style.display =
+    patchModel.nodes.length === 0 ? 'flex' : 'none';
+  document.getElementById('graph-meta').textContent =
+    `${patchModel.nodes.length} nodes · ${patchModel.connections.length} edges`;
+
+  // Connections first
+  for (const c of patchModel.connections) {
+    const src = patchModel.nodes.find(n => n.id === c.src);
+    const dst = patchModel.nodes.find(n => n.id === c.dst);
+    if (!src || !dst) continue;
+    const p1 = portCoords(src, 'outlet', c.srcOutlet);
+    const p2 = portCoords(dst, 'inlet', c.dstInlet);
+    const dx = Math.abs(p2.x - p1.x);
+    const cy = Math.min(60, dx / 2 + 20);
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', `M ${p1.x} ${p1.y} C ${p1.x} ${p1.y + cy}, ${p2.x} ${p2.y - cy}, ${p2.x} ${p2.y}`);
+    path.setAttribute('class', 'patch-line');
+    svg.appendChild(path);
+  }
+
+  // In-progress connection
+  if (state.connecting) {
+    const src = patchModel.nodes.find(n => n.id === state.connecting.srcNodeId);
+    if (src) {
+      const p1 = portCoords(src, 'outlet', state.connecting.srcOutlet);
+      const path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', `M ${p1.x} ${p1.y} L ${state.connecting.x} ${state.connecting.y}`);
+      path.setAttribute('class', 'patch-line in-progress');
+      svg.appendChild(path);
+    }
+  }
+
+  // Nodes
+  for (const node of patchModel.nodes) {
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('transform', `translate(${node.x},${node.y})`);
+    g.setAttribute('class', 'node-group' + (state.selectedIds.has(node.id) ? ' selected' : ''));
+    g.dataset.nodeId = node.id;
+
+    const cls = classifyObject(node.text, node.isControl);
+    const h = nodeHeight(node);
+
+    const rect = document.createElementNS(SVG_NS, 'rect');
+    rect.setAttribute('width', NODE_W); rect.setAttribute('height', h);
+    rect.setAttribute('rx', 3); rect.setAttribute('class', `node-box ${cls}`);
+    g.appendChild(rect);
+
+    const label = document.createElementNS(SVG_NS, 'text');
+    label.setAttribute('x', NODE_W / 2); label.setAttribute('y', 16);
+    label.setAttribute('text-anchor', 'middle'); label.setAttribute('class', 'node-label');
+    label.textContent = node.isControl
+      ? node.text.split(/\s+/)[0] + ' (live)'
+      : node.text;
+    g.appendChild(label);
+
+    const sub = document.createElementNS(SVG_NS, 'text');
+    sub.setAttribute('x', NODE_W / 2); sub.setAttribute('y', 30);
+    sub.setAttribute('text-anchor', 'middle'); sub.setAttribute('class', 'node-sublabel');
+    sub.textContent = node.isControl
+      ? `${node.varName} = ${node.controlValue.toFixed(2)}`
+      : node.varName;
+    g.appendChild(sub);
+
+    if (node.isControl) {
+      const sliderY = 42, sliderX = 8, sliderW = NODE_W - 16;
+      const track = document.createElementNS(SVG_NS, 'rect');
+      track.setAttribute('x', sliderX); track.setAttribute('y', sliderY);
+      track.setAttribute('width', sliderW); track.setAttribute('height', 6);
+      track.setAttribute('rx', 2); track.setAttribute('class', 'control-slider-track');
+      g.appendChild(track);
+      const pct = Math.min(1, Math.max(0, (node.controlValue - node.controlMin) / (node.controlMax - node.controlMin)));
+      const fill = document.createElementNS(SVG_NS, 'rect');
+      fill.setAttribute('x', sliderX); fill.setAttribute('y', sliderY);
+      fill.setAttribute('width', sliderW * pct); fill.setAttribute('height', 6);
+      fill.setAttribute('rx', 2); fill.setAttribute('class', 'control-slider-fill');
+      g.appendChild(fill);
+      const handle = document.createElementNS(SVG_NS, 'circle');
+      handle.setAttribute('cx', sliderX + sliderW * pct);
+      handle.setAttribute('cy', sliderY + 3);
+      handle.setAttribute('r', 5);
+      handle.setAttribute('class', 'control-slider-handle');
+      handle.dataset.role = 'slider';
+      handle.dataset.nodeId = node.id;
+      g.appendChild(handle);
+    }
+
+    // Ports
+    const numIn = numInlets(node);
+    for (let i = 0; i < numIn; i++) {
+      const port = document.createElementNS(SVG_NS, 'circle');
+      port.setAttribute('cx', NODE_W * (i + 1) / (numIn + 1));
+      port.setAttribute('cy', 0);
+      port.setAttribute('r', PORT_R);
+      port.setAttribute('class', 'node-port inlet');
+      port.dataset.nodeId = node.id; port.dataset.role = 'inlet'; port.dataset.idx = i;
+      g.appendChild(port);
+    }
+    const numOut = numOutlets(node);
+    for (let i = 0; i < numOut; i++) {
+      const port = document.createElementNS(SVG_NS, 'circle');
+      port.setAttribute('cx', NODE_W * (i + 1) / (numOut + 1));
+      port.setAttribute('cy', h);
+      port.setAttribute('r', PORT_R);
+      port.setAttribute('class', 'node-port outlet');
+      port.dataset.nodeId = node.id; port.dataset.role = 'outlet'; port.dataset.idx = i;
+      g.appendChild(port);
+    }
+
+    svg.appendChild(g);
+  }
+
+  updateSelectionInfo();
+}
+
+function updateSelectionInfo() {
+  const count = state.selectedIds.size;
+  document.getElementById('selection-count').textContent =
+    count === 0 ? 'no selection' : `${count} selected`;
+  document.getElementById('extend-btn').disabled = count === 0 || !settings.apiKey;
+  const info = document.getElementById('selection-info');
+  if (count > 0) {
+    const names = [...state.selectedIds]
+      .map(id => patchModel.nodes.find(n => n.id === id))
+      .filter(Boolean)
+      .map(n => n.varName);
+    info.textContent = `▸ Selection: ${names.join(', ')}`;
+    info.classList.add('show');
+  } else {
+    info.classList.remove('show');
+  }
+}
+
+// =============================================================================
+//  TOOLBAR / MODES
+// =============================================================================
+
+function setMode(mode) {
+  state.mode = mode;
+  state.connecting = null;
+  document.querySelectorAll('.tool-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  document.getElementById('graph-svg').className = 'mode-' + mode;
+  if (mode !== 'select') {
+    state.selectedIds.clear();
+    renderGraph2();
+  }
+}
+
+// =============================================================================
+//  GRAPH INTERACTIONS
+// =============================================================================
+
+function svgCoords(e) {
+  const svg = document.getElementById('graph-svg');
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX; pt.y = e.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function findClickedElement(e) {
+  // Walk up from the event target to find a meaningful SVG element
+  let el = e.target;
+  while (el && el.tagName !== 'svg') {
+    if (el.dataset && (el.dataset.role || el.dataset.nodeId)) return el;
+    el = el.parentNode;
+  }
+  return null;
+}
+
+function onSvgMouseDown(e) {
+  const coords = svgCoords(e);
+  const target = findClickedElement(e);
+
+  // Click on a slider handle: start dragging the value
+  if (target && target.dataset.role === 'slider') {
+    state.draggingSlider = {
+      nodeId: target.dataset.nodeId,
+      svgStartX: coords.x,
+    };
+    e.preventDefault();
+    return;
+  }
+
+  // Click on a port
+  if (target && (target.dataset.role === 'inlet' || target.dataset.role === 'outlet')) {
+    if (state.mode === 'connect') {
+      if (target.dataset.role === 'outlet') {
+        state.connecting = {
+          srcNodeId: target.dataset.nodeId,
+          srcOutlet: parseInt(target.dataset.idx),
+          x: coords.x, y: coords.y,
+        };
+        renderGraph2();
+      } else if (state.connecting && target.dataset.role === 'inlet') {
+        // Complete the connection
+        addConnection(
+          state.connecting.srcNodeId,
+          state.connecting.srcOutlet,
+          target.dataset.nodeId,
+          parseInt(target.dataset.idx)
+        );
+        state.connecting = null;
+        updateStats('human');
+        logEvent('connect', { src: state.connecting?.srcNodeId, dst: target.dataset.nodeId });
+        syncCodeFromModel();
+        renderGraph2();
+      }
+      return;
+    }
+  }
+
+  // Click on a node body
+  if (target && target.dataset.nodeId && !target.dataset.role) {
+    const nodeId = target.dataset.nodeId;
+    if (state.mode === 'select') {
+      // Select and start dragging
+      if (!e.shiftKey) state.selectedIds.clear();
+      state.selectedIds.add(nodeId);
+      const node = patchModel.nodes.find(n => n.id === nodeId);
+      state.draggingNode = nodeId;
+      state.dragOffset = { x: coords.x - node.x, y: coords.y - node.y };
+      renderGraph2();
+    }
+    return;
+  }
+
+  // Click on empty space
+  if (state.mode === 'select') {
+    state.selectedIds.clear();
+    renderGraph2();
+  } else if (state.mode === 'connect') {
+    state.connecting = null;
+    renderGraph2();
+  }
+}
+
+function onSvgMouseMove(e) {
+  const coords = svgCoords(e);
+
+  // Dragging a slider value
+  if (state.draggingSlider) {
+    const node = patchModel.nodes.find(n => n.id === state.draggingSlider.nodeId);
+    if (node) {
+      const sliderX = 8, sliderW = NODE_W - 16;
+      const localX = coords.x - node.x;
+      const pct = Math.min(1, Math.max(0, (localX - sliderX) / sliderW));
+      node.controlValue = node.controlMin + pct * (node.controlMax - node.controlMin);
+      // Update the live audio if playing
+      updateLiveControl(node);
+      syncCodeFromModel();
+      renderGraph2();
+    }
+    return;
+  }
+
+  // Dragging a node
+  if (state.draggingNode) {
+    const node = patchModel.nodes.find(n => n.id === state.draggingNode);
+    if (node) {
+      node.x = Math.max(0, coords.x - state.dragOffset.x);
+      node.y = Math.max(0, coords.y - state.dragOffset.y);
+      renderGraph2();
+    }
+    return;
+  }
+
+  // Drawing a connection in progress
+  if (state.connecting) {
+    state.connecting.x = coords.x;
+    state.connecting.y = coords.y;
+    renderGraph2();
+    return;
+  }
+}
+
+function onSvgMouseUp(e) {
+  if (state.draggingNode) {
+    logEvent('move_node', { id: state.draggingNode });
+    syncCodeFromModel();
+    state.draggingNode = null;
+  }
+  if (state.draggingSlider) {
+    logEvent('control_change', {
+      id: state.draggingSlider.nodeId,
+      value: patchModel.nodes.find(n => n.id === state.draggingSlider.nodeId)?.controlValue,
+    });
+    state.draggingSlider = null;
+  }
+}
+
+function onKeyDown(e) {
+  // Mode shortcuts
+  if (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT') return;
+  if (e.key === 'v' || e.key === 'V') setMode('select');
+  if (e.key === 'a' || e.key === 'A') setMode('connect');
+  if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedIds.size > 0) {
+    for (const id of state.selectedIds) removeNode(id);
+    state.selectedIds.clear();
+    updateStats('human');
+    logEvent('delete_nodes');
+    syncCodeFromModel();
+    renderGraph2();
+  }
+}
+
+// =============================================================================
+//  DRAG & DROP FROM PALETTE
+// =============================================================================
+//  Palette chips have `draggable="true"`. On dragstart we serialize the node
+//  spec into dataTransfer; on drop over the SVG we deserialize and call addNode
+//  at the drop position. This is the primary way to build a graph by hand.
+
+function wirePaletteDrag() {
+  document.querySelectorAll('.palette-chip').forEach(chip => {
+    chip.addEventListener('dragstart', (e) => {
+      const spec = {
+        text: chip.dataset.text,
+        isControl: chip.dataset.control === '1',
+      };
+      if (spec.isControl) {
+        spec.controlMin   = parseFloat(chip.dataset.min);
+        spec.controlMax   = parseFloat(chip.dataset.max);
+        spec.controlValue = parseFloat(chip.dataset.value);
+      }
+      e.dataTransfer.setData('application/json', JSON.stringify(spec));
+      e.dataTransfer.effectAllowed = 'copy';
+      chip.classList.add('dragging');
+    });
+    chip.addEventListener('dragend', () => {
+      chip.classList.remove('dragging');
+    });
+  });
+
+  const svg = document.getElementById('graph-svg');
+  svg.addEventListener('dragover', (e) => {
+    // Only react if a palette chip is being dragged (has our JSON type)
+    if (![...e.dataTransfer.types].includes('application/json')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    svg.classList.add('drag-over');
+  });
+  svg.addEventListener('dragleave', (e) => {
+    // dragleave fires when entering child elements too — only clear if we
+    // truly left the SVG
+    if (!svg.contains(e.relatedTarget)) svg.classList.remove('drag-over');
+  });
+  svg.addEventListener('drop', (e) => {
+    e.preventDefault();
+    svg.classList.remove('drag-over');
+    let spec;
+    try { spec = JSON.parse(e.dataTransfer.getData('application/json')); }
+    catch { return; }
+    if (!spec || !spec.text) return;
+
+    const coords = svgCoords(e);
+    addNode({
+      text: spec.text,
+      x: coords.x - NODE_W / 2,
+      y: coords.y - 20,
+      isControl: spec.isControl,
+      controlMin: spec.controlMin,
+      controlMax: spec.controlMax,
+      controlValue: spec.controlValue,
+    });
+    updateStats('human');
+    logEvent('drop_node', { text: spec.text, isControl: !!spec.isControl });
+    syncCodeFromModel();
+    renderGraph2();
+  });
+}
+
+// =============================================================================
+//  WEBAUDIO TRANSLATION + PLAYBACK
+// =============================================================================
+
+function parseObjectText(text) {
+  const parts = (text || '').trim().split(/\s+/);
+  return { name: parts[0], args: parts.slice(1).map(a => isNaN(Number(a)) ? a : Number(a)) };
+}
+
+function buildAudioGraph(model, ctx, destination) {
+  const audioNodes = {};
+  const created = [];
+
+  for (const n of model.nodes) {
+    const text = n.isControl ? n.text.split(/\s+/)[0] + ' ' + n.controlValue : n.text;
+    const { name, args } = parseObjectText(text);
+    const entry = { type: name, inlets: [], outlets: [], controlGain: null };
+
+    switch (name) {
+      case 'cycle~': {
+        const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = args[0] || 0;
+        entry.inlets = [{ param: o.frequency }];
+        entry.outlets = [o]; created.push(o); break;
+      }
+      case 'saw~': case 'tri~': case 'rect~': case 'phasor~': {
+        const o = ctx.createOscillator();
+        o.type = name === 'tri~' ? 'triangle' : name === 'rect~' ? 'square' : 'sawtooth';
+        o.frequency.value = args[0] || 0;
+        entry.inlets = [{ param: o.frequency }]; entry.outlets = [o]; created.push(o); break;
+      }
+      case 'noise~': {
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+        entry.outlets = [src]; created.push(src); break;
+      }
+      case '*~': {
+        const g = ctx.createGain(); g.gain.value = args[0] !== undefined ? args[0] : 1;
+        entry.inlets = [{ node: g }, { param: g.gain }];
+        entry.outlets = [g];
+        entry.controlGain = g;  // exposed for live control
+        break;
+      }
+      case '+~': case 'gain~': {
+        const g = ctx.createGain();
+        g.gain.value = name === 'gain~' && args[0] !== undefined ? args[0] : 1;
+        entry.inlets = [{ node: g }, { node: g }]; entry.outlets = [g]; break;
+      }
+      case 'lores~': case 'biquad~': case 'reson~': {
+        const f = ctx.createBiquadFilter(); f.type = 'lowpass';
+        f.frequency.value = args[0] || 1000; f.Q.value = args[1] || 1;
+        entry.inlets = [{ node: f }, { param: f.frequency }, { param: f.Q }];
+        entry.outlets = [f]; break;
+      }
+      case 'hires~': {
+        const f = ctx.createBiquadFilter(); f.type = 'highpass';
+        f.frequency.value = args[0] || 1000; f.Q.value = args[1] || 1;
+        entry.inlets = [{ node: f }, { param: f.frequency }, { param: f.Q }];
+        entry.outlets = [f]; break;
+      }
+      case 'dac~': case 'ezdac~': {
+        entry.inlets = [{ node: destination }, { node: destination }];
+        entry.outlets = []; break;
+      }
+      default: {
+        const p = ctx.createGain(); p.gain.value = 1;
+        entry.inlets = [{ node: p }]; entry.outlets = [p];
+        appendConsole(`[warn] unsupported: ${name}`, 'stderr-line'); break;
+      }
+    }
+    audioNodes[n.id] = entry;
+  }
+
+  for (const c of model.connections) {
+    const src = audioNodes[c.src], dst = audioNodes[c.dst];
+    if (!src || !dst) continue;
+    const srcNode = src.outlets[c.srcOutlet];
+    const dstInlet = dst.inlets[c.dstInlet];
+    if (!srcNode || !dstInlet) continue;
+    try {
+      if (dstInlet.param) srcNode.connect(dstInlet.param);
+      else if (dstInlet.node) srcNode.connect(dstInlet.node);
+    } catch (e) {
+      appendConsole(`[warn] couldn't connect ${c.src}→${c.dst}: ${e.message}`, 'stderr-line');
+    }
+  }
+
+  return { audioNodes, sources: created };
+}
+
+async function playAudio() {
+  if (patchModel.nodes.length === 0) return;
+  stopAudio();
+  state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (state.audioCtx.state === 'suspended') await state.audioCtx.resume();
+  state.masterGain = state.audioCtx.createGain();
+  state.masterGain.gain.value = 0.6;
+  state.analyser = state.audioCtx.createAnalyser();
+  state.analyser.fftSize = 512;
+  state.masterGain.connect(state.analyser);
+  state.masterGain.connect(state.audioCtx.destination);
+
+  const { audioNodes, sources } = buildAudioGraph(patchModel, state.audioCtx, state.masterGain);
+  state.audioNodes = audioNodes;
+  state.activeSources = sources;
+  sources.forEach(s => { try { s.start(); } catch (e) {} });
+  document.querySelectorAll('.patch-line').forEach(l => l.classList.add('active'));
+  startVuMeter();
+  setStatus('Playing', 'ready');
+  document.getElementById('play-btn').disabled = true;
+  document.getElementById('stop-btn').disabled = false;
+  logEvent('play');
+}
+
+function stopAudio() {
+  stopVuMeter();
+  document.querySelectorAll('.patch-line').forEach(l => l.classList.remove('active'));
+  state.activeSources.forEach(n => { try { n.stop(); } catch (e) {} });
+  state.activeSources = [];
+  state.audioNodes = {};
+  if (state.audioCtx) { state.audioCtx.close(); state.audioCtx = null; }
+  document.getElementById('play-btn').disabled = patchModel.nodes.length === 0;
+  document.getElementById('stop-btn').disabled = true;
+  document.getElementById('vu-meter').innerHTML = '';
+  setStatus('Stopped', 'ready');
+  logEvent('stop');
+}
+
+function updateLiveControl(node) {
+  // While audio is playing, dragging a slider updates the underlying GainNode
+  if (!state.audioCtx) return;
+  const entry = state.audioNodes[node.id];
+  if (entry && entry.controlGain) {
+    try { entry.controlGain.gain.setValueAtTime(node.controlValue, state.audioCtx.currentTime); }
+    catch (e) {}
+  }
+}
+
+let vuRafId = null;
+function startVuMeter() {
+  const meter = document.getElementById('vu-meter');
+  meter.innerHTML = '';
+  const bars = [];
+  for (let i = 0; i < 12; i++) {
+    const b = document.createElement('div'); b.className = 'vu-bar';
+    meter.appendChild(b); bars.push(b);
+  }
+  const data = new Uint8Array(state.analyser.frequencyBinCount);
+  function tick() {
+    state.analyser.getByteFrequencyData(data);
+    const step = Math.floor(data.length / bars.length);
+    for (let i = 0; i < bars.length; i++) {
+      let sum = 0;
+      for (let j = 0; j < step; j++) sum += data[i * step + j];
+      const v = sum / step / 255;
+      bars[i].style.height = Math.max(2, v * 14) + 'px';
+      bars[i].className = 'vu-bar' + (v > 0.05 ? (v > 0.6 ? ' hot' : ' lit') : '');
+    }
+    vuRafId = requestAnimationFrame(tick);
+  }
+  tick();
+}
+function stopVuMeter() { if (vuRafId) cancelAnimationFrame(vuRafId); vuRafId = null; }
+
+// =============================================================================
+//  PYODIDE
+// =============================================================================
+
+async function initPyodide() {
+  try {
+    setStatus('Loading Pyodide…', 'loading');
+    state.pyodide = await loadPyodide();
+    state.pyodide.setStdout({ batched: (s) => appendConsole(s, 'stdout-line') });
+    state.pyodide.setStderr({ batched: (s) => appendConsole(s, 'stderr-line') });
+    setStatus('Installing maxpylang…', 'loading');
+    await state.pyodide.loadPackage('micropip');
+    await state.pyodide.runPythonAsync(`
+import micropip
+await micropip.install("maxpylang")
+    `);
+    setStatus('Ready', 'ready');
+    document.getElementById('run-btn').disabled = false;
+    document.getElementById('send-btn').disabled = !settings.apiKey;
+    if (!settings.apiKey) {
+      addChatMessage('system',
+        'Click <strong>⚙ Settings</strong> to add an API key. Or build a patch using the toolbar — no key needed.');
+    }
+    // Auto-run the starter code
+    runCode('init');
+  } catch (err) {
+    setStatus('Init failed', 'error');
+    appendConsole(err.toString(), 'stderr-line');
+  }
+}
+
+async function runCode(source = 'human') {
+  if (!state.pyodide) return;
+  const code = document.getElementById('code').value;
+  document.getElementById('run-btn').disabled = true;
+  document.getElementById('play-btn').disabled = true;
+  setStatus('Executing…', 'loading');
+  if (source === 'human') {
+    logEvent('run', { source, codeLen: code.length });
+    document.getElementById('code').classList.remove('synced-from-graph');
+    document.getElementById('code-source-tag').textContent = 'manual';
+  }
+
+  try {
+    const wrapped = code + `
+
+import json as _json
+_patch_dict = patch.dict
+_patch_json = _json.dumps(_patch_dict)
+`;
+    await state.pyodide.runPythonAsync(wrapped);
+    const json = state.pyodide.globals.get('_patch_json');
+    const dict = JSON.parse(json);
+    dictToModel(dict);
+    autoArrangeIfNeeded();
+    renderGraph2();
+    setStatus('Patch built · ready to play', 'ready');
+    document.getElementById('play-btn').disabled = patchModel.nodes.length === 0;
+  } catch (err) {
+    setStatus('Python error', 'error');
+    appendConsole(err.toString(), 'stderr-line');
+  } finally {
+    document.getElementById('run-btn').disabled = false;
+  }
+}
+
+function autoArrangeIfNeeded() {
+  // If all nodes are at the same position (e.g., from Pyodide which doesn't
+  // emit patching_rect for placement), arrange them by depth
+  const allSame = patchModel.nodes.every(n => n.x === patchModel.nodes[0].x && n.y === patchModel.nodes[0].y);
+  if (allSame || patchModel.nodes.some(n => n.x < 10)) {
+    autoArrange();
+  }
+}
+
+function autoArrange() {
+  const depth = {};
+  function computeDepth(id, visited = new Set()) {
+    if (visited.has(id)) return 0;
+    visited.add(id);
+    const node = patchModel.nodes.find(n => n.id === id);
+    if (!node) return 0;
+    const incoming = patchModel.connections.filter(c => c.dst === id);
+    if (incoming.length === 0) { depth[id] = 0; return 0; }
+    const d = 1 + Math.max(...incoming.map(c => computeDepth(c.src, visited)));
+    depth[id] = d;
+    return d;
+  }
+  patchModel.nodes.forEach(n => computeDepth(n.id));
+  const cols = {};
+  Object.entries(depth).forEach(([id, d]) => {
+    if (!cols[d]) cols[d] = [];
+    cols[d].push(id);
+  });
+  const numCols = Math.max(0, ...Object.keys(cols).map(Number)) + 1;
+  const colWidth = 800 / (numCols + 1);
+  Object.entries(cols).forEach(([d, ids]) => {
+    const colX = colWidth * (Number(d) + 1) - NODE_W / 2;
+    const rowGap = 460 / (ids.length + 1);
+    ids.forEach((id, i) => {
+      const node = patchModel.nodes.find(n => n.id === id);
+      if (node) {
+        node.x = colX;
+        node.y = rowGap * (i + 1) - 20;
+      }
+    });
+  });
+  syncCodeFromModel();
+  renderGraph2();
+}
+
+// =============================================================================
+//  CHAT / LLM
+// =============================================================================
+
+function addChatMessage(role, content) {
+  const msgEl = document.createElement('div');
+  msgEl.className = 'msg ' + role;
+  const header = document.createElement('div');
+  header.className = 'msg-header';
+  const tagText = role === 'human' ? 'you' : role === 'machine' ? 'co-pilot' : 'system';
+  header.innerHTML = `<span class="msg-tag ${role}">${tagText}</span><span>${new Date().toLocaleTimeString()}</span>`;
+  msgEl.appendChild(header);
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+  body.innerHTML = content;
+  msgEl.appendChild(body);
+  const container = document.getElementById('chat-messages');
+  container.appendChild(msgEl);
+  container.scrollTop = 1e9;
+  return msgEl;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderMessageContent(text) {
+  const codeBlocks = [];
+  let processed = text.replace(/```(?:python)?\n([\s\S]*?)```/g, (m, code) => {
+    codeBlocks.push(code.trim());
+    return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+  });
+  processed = processed.replace(/`([^`]+)`/g,
+    '<code style="background: var(--bg-deeper); padding: 1px 4px; border-radius: 2px; color: var(--signal);">$1</code>');
+  processed = processed.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  processed = processed.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  processed = processed.replace(/\n\n/g, '</p><p>');
+  processed = `<p>${processed}</p>`;
+  codeBlocks.forEach((code, i) => {
+    processed = processed.replace(`__CODE_BLOCK_${i}__`,
+      `<pre>${escapeHtml(code)}</pre>`);
+  });
+  return { html: processed, codeBlocks };
+}
+
+async function callLLM(userMessage, extraContext = '') {
+  const currentCode = document.getElementById('code').value;
+
+  const messages = chatHistory
+    .filter(m => m.role !== 'system')
+    .map(m => ({ role: m.role === 'human' ? 'user' : 'assistant', content: m.content }));
+
+  messages.push({
+    role: 'user',
+    content: `Current MaxPyLang code:
+\`\`\`python
+${currentCode}
+\`\`\`
+
+Patch state: ${patchModel.nodes.length} nodes, ${patchModel.connections.length} connections.
+${extraContext}
+
+User request: ${userMessage}
+
+Respond with a brief reasoning paragraph, then the FULL revised code in a single \`\`\`python code block. Keep changes focused. Mention 1-2 alternative directions.`
+  });
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': settings.apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: settings.model, max_tokens: 2000,
+      system: KNOWLEDGE_BASE, messages,
+    }),
+  });
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`API ${response.status}: ${err}`);
+  }
+  const data = await response.json();
+  return data.content.map(b => b.text || '').join('');
+}
+
+async function sendMessage(extraContext = '') {
+  const input = document.getElementById('chat-input');
+  const userMessage = input.value.trim();
+  if (!userMessage) return;
+  if (!settings.apiKey) {
+    addChatMessage('system', 'Set an API key in Settings first.');
+    return;
+  }
+
+  const { html } = renderMessageContent(userMessage);
+  addChatMessage('human', html);
+  chatHistory.push({ role: 'human', content: userMessage, timestamp: Date.now() });
+  logEvent('chat_send', { text: userMessage, extraContext });
+  input.value = '';
+  document.getElementById('send-btn').disabled = true;
+  setStatus('Co-pilot thinking…', 'loading');
+
+  try {
+    const reply = await callLLM(userMessage, extraContext);
+    chatHistory.push({ role: 'machine', content: reply, timestamp: Date.now() });
+    logEvent('chat_recv', { text: reply });
+    const { html, codeBlocks } = renderMessageContent(reply);
+    const msgEl = addChatMessage('machine', html);
+    if (codeBlocks.length > 0) {
+      const proposedCode = codeBlocks[codeBlocks.length - 1];
+      attachProposalCard(msgEl, proposedCode);
+      updateStats('machine');
+    }
+    setStatus('Ready', 'ready');
+  } catch (err) {
+    addChatMessage('system', `<strong style="color: var(--error)">Error:</strong> ${escapeHtml(err.message)}`);
+    setStatus('LLM error', 'error');
+  } finally {
+    document.getElementById('send-btn').disabled = false;
+  }
+}
+
+function attachProposalCard(msgEl, proposedCode) {
+  const card = document.createElement('div');
+  card.className = 'proposal-card';
+  card.innerHTML = `
+    <div class="proposal-header">
+      <span>▸ Proposed change</span>
+      <span style="color: var(--ink-faint)">${proposedCode.split('\n').length} lines</span>
+    </div>
+    <div style="color: var(--ink-dim); font-size: 0.68rem;">Co-pilot proposed replacing the code. Your choice:</div>
+    <div class="proposal-actions">
+      <button class="signal accept-btn">✓ Accept &amp; run</button>
+      <button class="danger reject-btn">✗ Reject</button>
+      <button class="modify-btn">↗ Send to editor</button>
+    </div>`;
+  msgEl.querySelector('.msg-body').appendChild(card);
+
+  card.querySelector('.accept-btn').addEventListener('click', () => {
+    document.getElementById('code').value = proposedCode;
+    document.getElementById('code-source-tag').textContent = 'from copilot';
+    card.querySelector('.proposal-actions').innerHTML =
+      '<span style="color: var(--signal); font-size: 0.68rem;">✓ accepted</span>';
+    updateStats('accepted');
+    logEvent('proposal_accept', { code: proposedCode });
+    runCode('machine');
+  });
+  card.querySelector('.reject-btn').addEventListener('click', () => {
+    card.querySelector('.proposal-actions').innerHTML =
+      '<span style="color: var(--error); font-size: 0.68rem;">✗ rejected</span>';
+    updateStats('rejected');
+    logEvent('proposal_reject');
+  });
+  card.querySelector('.modify-btn').addEventListener('click', () => {
+    document.getElementById('code').value = proposedCode;
+    document.getElementById('code-source-tag').textContent = 'from copilot (modified)';
+    card.querySelector('.proposal-actions').innerHTML =
+      '<span style="color: var(--human); font-size: 0.68rem;">↗ sent to editor</span>';
+    logEvent('proposal_modify');
+  });
+}
+
+function extendSelection() {
+  if (state.selectedIds.size === 0) return;
+  const selectedNodes = patchModel.nodes.filter(n => state.selectedIds.has(n.id));
+  const names = selectedNodes.map(n => `${n.varName} (${n.text})`).join(', ');
+  const input = document.getElementById('chat-input');
+  if (!input.value.trim()) {
+    input.value = `Extend this section: ${names}. Build on it musically.`;
+  }
+  sendMessage(`The user has selected these nodes to extend: ${names}. Their request is about extending or modifying this specific section of the patch.`);
+}
+
+function explainPatch() {
+  const input = document.getElementById('chat-input');
+  input.value = 'Explain what the current patch does sonically. What would I hear? Suggest 2-3 directions I could take it.';
+  sendMessage();
+}
+
+// =============================================================================
+//  SETTINGS / EXPORT
+// =============================================================================
+
+function showSettings() {
+  document.getElementById('api-key-input').value = settings.apiKey;
+  document.getElementById('model-input').value = settings.model;
+  document.getElementById('settings-modal').classList.add('show');
+}
+function hideSettings() { document.getElementById('settings-modal').classList.remove('show'); }
+function saveSettings() {
+  settings.apiKey = document.getElementById('api-key-input').value.trim();
+  settings.model = document.getElementById('model-input').value.trim() || 'claude-opus-4-5';
+  localStorage.setItem('anthropic_key', settings.apiKey);
+  localStorage.setItem('anthropic_model', settings.model);
+  document.getElementById('model-tag').textContent = settings.model.split('-')[1] || 'claude';
+  document.getElementById('send-btn').disabled = !settings.apiKey || !state.pyodide;
+  updateSelectionInfo();
+  hideSettings();
+  if (settings.apiKey) addChatMessage('system', `API key saved. Model: ${settings.model}.`);
+}
+
+function exportLog() {
+  const blob = new Blob([JSON.stringify({
+    timestamp: new Date().toISOString(),
+    stats, chatHistory, interactionLog, finalPatch: patchModel,
+  }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `maxpy-session-${Date.now()}.json`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+// =============================================================================
+//  WIRE UP
+// =============================================================================
+
+document.querySelectorAll('.tool-btn[data-mode]').forEach(b => {
+  b.addEventListener('click', () => setMode(b.dataset.mode));
+});
+document.getElementById('auto-arrange-btn').addEventListener('click', () => {
+  autoArrange();
+  logEvent('auto_arrange');
+});
+document.getElementById('clear-graph-btn').addEventListener('click', () => {
+  if (patchModel.nodes.length === 0) return;
+  if (confirm('Clear all nodes?')) {
+    clearModel();
+    state.selectedIds.clear();
+    updateStats('human');
+    logEvent('clear');
+    syncCodeFromModel();
+    renderGraph2();
+  }
+});
+
+const svg = document.getElementById('graph-svg');
+svg.addEventListener('mousedown', onSvgMouseDown);
+svg.addEventListener('mousemove', onSvgMouseMove);
+svg.addEventListener('mouseup', onSvgMouseUp);
+window.addEventListener('keydown', onKeyDown);
+
+document.getElementById('run-btn').addEventListener('click', () => {
+  updateStats('human');
+  logEvent('human_run', { codeLen: document.getElementById('code').value.length });
+  runCode('human');
+});
+document.getElementById('play-btn').addEventListener('click', playAudio);
+document.getElementById('stop-btn').addEventListener('click', stopAudio);
+document.getElementById('send-btn').addEventListener('click', () => sendMessage());
+document.getElementById('extend-btn').addEventListener('click', extendSelection);
+document.getElementById('explain-btn').addEventListener('click', explainPatch);
+document.getElementById('settings-btn').addEventListener('click', showSettings);
+document.getElementById('settings-cancel').addEventListener('click', hideSettings);
+document.getElementById('settings-save').addEventListener('click', saveSettings);
+document.getElementById('export-btn').addEventListener('click', exportLog);
+
+document.getElementById('chat-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendMessage(); }
+});
+document.getElementById('code').addEventListener('input', () => {
+  document.getElementById('code').classList.remove('synced-from-graph');
+  document.getElementById('code-source-tag').textContent = 'manual (unsaved)';
+});
+
+// Boot
+wirePaletteDrag();
+renderGraph2();
+initPyodide();
+</script>
+</body>
+</html>
